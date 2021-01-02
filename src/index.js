@@ -5,7 +5,9 @@ const path = require('path')
 const socketio = require('socket.io')
 const server = http.createServer(app)
 const io = socketio(server)
-
+const { generateMessage,generateLocation } = require('./utils/messages')
+const {addUser,removeUser,getUser,getUserInRoom} = require('./utils/user')
+ 
 
 
 const port = process.env.PORT || 3000
@@ -14,27 +16,56 @@ const pathName = path.join(__dirname,'../public')
 
 app.use(express.static(pathName))
 
-const messege = `Welcome!`
+
 
 io.on('connection',(socket)=>{
 
     console.log('New webSocket connected!')
-    socket.emit('WelcomeMsg', messege)
-    socket.broadcast.emit('WelcomeMsg','A new user has joined!')
     
+    
+    socket.on('join', ({username, room}, callback)=>{
+        const {user, error} = addUser({id:socket.id , username, room})
+        if(error){
+            return callback(error)
+        }
+
+        socket.join(user.room)
+        socket.emit('WelcomeMsg', generateMessage('Admin','Welcome!'))
+        socket.broadcast.to(user.room).emit('WelcomeMsg',generateMessage(`${user.username} has joined!`))
+        io.to(user.room).emit('roomData', {
+            room:user.room,
+            users: getUserInRoom(user.room)
+        })
+        
+    })
+
     
     socket.on('msgSent',(message,callback)=>{
-        io.emit('WelcomeMsg',message)
+        const user = getUser(socket.id)
+        if(user){
+            io.to(user.room).emit('WelcomeMsg',generateMessage(user.username,message))
+
+        }
         callback()
     })
 
     socket.on('sentLocation', (position,callback) => {
-        io.emit('WelcomeMsg',`https://google.com/maps?q=${position.longitude},${position.latitude}`)
+        const user = getUser(socket.id)
+        if(user){
+            io.to(user.room).emit('locationMessage',generateLocation(user.username,`https://google.com/maps?q=${position.longitude},${position.latitude}`))
+        }
         callback()
     })
 
     socket.on('disconnect',()=>{
-        io.emit('WelcomeMsg', 'A user has been left :(')
+        const user = removeUser(socket.id)
+        if(user){
+            io.to(user.room).emit('WelcomeMsg', generateMessage('Admin',`${user.username} has left!`))
+            io.to(user.room).emit('roomData', {
+                room:user.room,
+                users:getUserInRoom(user.room)
+            })
+        }
     })
 
 })
